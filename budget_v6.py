@@ -1,15 +1,19 @@
 import calendar
 import csv
 import os
+import shutil
 from datetime import date
 
 FICHIER = "budget.csv"
+FICHIER_SAUVEGARDE = "budget_sauvegarde.csv"
 FICHIER_LIMITES = "limites.csv"
 CATEGORIES_DEPENSES = ["activité", "nourriture", "vêtements", "makeup/soin",
                        "abonnement", "autres"]
 CATEGORIES_REVENUS = ["salaire", "job étudiant", "aide de la famille", "autre"]
 MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
         "août", "septembre", "octobre", "novembre", "décembre"]
+LIBELLES = {"revenu": "entrée", "depense": "dépense", "economie": "épargne",
+            "debut": "début", "fin": "fin"}
 
 
 # ---------- Mois et jours ----------
@@ -124,6 +128,22 @@ def lire_operations(mois):
                         jour = int(ligne[4])
                     operations.append((ligne[1], ligne[2], float(ligne[3]), jour))
     return operations
+
+
+def lire_toutes_les_lignes():
+    lignes = []
+    if os.path.exists(FICHIER):
+        with open(FICHIER, newline="", encoding="utf-8") as f:
+            lignes = [ligne for ligne in csv.reader(f) if ligne]
+    return lignes
+
+
+def ecrire_toutes_les_lignes(lignes):
+    # Copie de sécurité avant de modifier le fichier
+    if os.path.exists(FICHIER):
+        shutil.copy(FICHIER, FICHIER_SAUVEGARDE)
+    with open(FICHIER, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(lignes)
 
 
 def lire_limites():
@@ -300,6 +320,77 @@ def afficher_liste(mois):
         print(f"  {date_texte}  {signe} {montant:>8.2f} €  {categorie}")
 
 
+def corriger_operation(mois):
+    lignes = lire_toutes_les_lignes()
+    indices = [i for i, ligne in enumerate(lignes) if ligne[0] == mois]
+
+    if not indices:
+        print(f"\nAucune opération notée pour {nom_du_mois(mois)}.")
+        return
+
+    print(f"\n--- Opérations de {nom_du_mois(mois)} (dans l'ordre où tu les as notées) ---")
+    for numero, i in enumerate(indices, start=1):
+        ligne = lignes[i]
+        jour = int(ligne[4]) if len(ligne) > 4 and ligne[4] != "" else None
+        date_texte = formater_date(mois, jour) if jour else "  -  "
+        print(f"  {numero:>2}. {date_texte}  {LIBELLES[ligne[1]]:<8}"
+              f"{float(ligne[3]):>9.2f} €  {ligne[2]}")
+
+    while True:
+        reponse = input("\nNuméro de l'opération à corriger (Entrée pour annuler) : ").strip()
+        if reponse == "":
+            return
+        if reponse.isdigit() and 1 <= int(reponse) <= len(indices):
+            break
+        print(f"Tape un numéro entre 1 et {len(indices)}.")
+
+    position = indices[int(reponse) - 1]
+    ligne = lignes[position]
+    while len(ligne) < 5:
+        ligne.append("")
+    type_operation = ligne[1]
+
+    actions = ["Supprimer cette opération", "Changer le montant"]
+    if type_operation in ("revenu", "depense"):
+        actions.append("Changer la catégorie")
+    if type_operation in ("revenu", "depense", "economie"):
+        actions.append("Changer le jour")
+    actions.append("Annuler")
+
+    choix = demander_categorie("Que veux-tu faire ?", actions)
+
+    if choix == "Annuler":
+        print("\nRien n'a été changé.")
+        return
+
+    if choix == "Supprimer cette opération":
+        confirmation = input("Sûr de vouloir la supprimer ? (o/n) : ").strip().lower()
+        if confirmation != "o":
+            print("\nRien n'a été changé.")
+            return
+        del lignes[position]
+        message = "✔ L'opération est supprimée."
+    elif choix == "Changer le montant":
+        solde = type_operation in ("debut", "fin")
+        ligne[3] = demander_montant("Nouveau montant (en €) : ",
+                                    autoriser_zero=solde, autoriser_negatif=solde)
+        message = "✔ Le montant est corrigé."
+    elif choix == "Changer la catégorie":
+        if type_operation == "revenu":
+            categories = CATEGORIES_REVENUS
+        else:
+            categories = CATEGORIES_DEPENSES
+        ligne[2] = demander_categorie("Nouvelle catégorie ?", categories)
+        message = "✔ La catégorie est corrigée."
+    else:
+        ligne[4] = demander_jour(mois)
+        message = "✔ Le jour est corrigé."
+
+    ecrire_toutes_les_lignes(lignes)
+    print(f"\n{message}")
+    print(f"(Une copie de l'ancienne version est dans {FICHIER_SAUVEGARDE}.)")
+
+
 def afficher_bilan(mois):
     bilan = calculer_bilan(mois)
     if bilan["vide"]:
@@ -423,7 +514,8 @@ def menu():
         print("  7. Gérer mes limites par catégorie")
         print("  8. Comparer avec un autre mois")
         print("  9. Changer de mois")
-        print("  10. Quitter")
+        print("  10. Corriger ou supprimer une opération")
+        print("  11. Quitter")
         choix = input("Ton choix : ")
 
         if choix == "1":
@@ -447,10 +539,12 @@ def menu():
             mois = demander_mois(
                 "Nouveau mois (ex. 11/2026) ou Entrée pour ne pas changer : ", mois)
         elif choix == "10":
+            corriger_operation(mois)
+        elif choix == "11":
             print("À bientôt !")
             break
         else:
-            print("Tape un numéro entre 1 et 10.")
+            print("Tape un numéro entre 1 et 11.")
 
 
 menu()
